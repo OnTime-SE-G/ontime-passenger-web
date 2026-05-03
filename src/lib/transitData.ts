@@ -154,3 +154,51 @@ export const BUSES: Record<string, BusData> = {
   "5": { id: "5", number: "882", routeId: "r882", driverName: "D. Bandara",     status: "active",  initProgress: 0.54, occupancyPct: 83 },
   "6": { id: "6", number: "138", routeId: "r138", driverName: "P. Kumara",      status: "active",  initProgress: 0.67, occupancyPct: 38 },
 };
+
+// ── API fetch helpers ─────────────────────────────────────────────────────────
+
+export interface LiveBus {
+  id: string;
+  status: string;
+  route_id: string | null;
+  latitude: number | null;
+  longitude: number | null;
+}
+
+/** Fetch all routes as GeoJSON from the backend; falls back to static data. */
+export async function fetchAllRoutesFromApi(): Promise<TransitRoute[]> {
+  try {
+    const summaries: { id: number; name: string }[] = await fetch('/api/routes').then(r => r.json());
+    const routes = await Promise.all(
+      summaries.map(async (s) => {
+        const geojson = await fetch(`/api/routes/${s.id}`).then(r => r.json());
+        const lineFeature = geojson.features?.find(
+          (f: { properties: { feature_type: string } }) => f.properties?.feature_type === 'route'
+        );
+        const stopFeatures: { properties: { name: string; order: number }; geometry: { coordinates: [number, number] } | null }[] =
+          geojson.features?.filter(
+            (f: { properties: { feature_type: string } }) => f.properties?.feature_type === 'stop'
+          ) ?? [];
+        if (!lineFeature) return null;
+        const coords: [number, number][] = lineFeature.geometry.coordinates;
+        const stops: RouteStop[] = stopFeatures
+          .sort((a, b) => a.properties.order - b.properties.order)
+          .map((f) => ({ name: f.properties.name, coordinates: f.geometry?.coordinates ?? [0, 0] }));
+        return { id: `r${s.id}`, number: String(s.id), name: s.name, color: '#004ac6', path: coords, stops } satisfies TransitRoute;
+      })
+    );
+    return routes.filter(Boolean) as TransitRoute[];
+  } catch {
+    return Object.values(TRANSIT_ROUTES);
+  }
+}
+
+/** Fetch live bus positions; returns empty array on error. */
+export async function fetchLiveBusesFromApi(): Promise<LiveBus[]> {
+  try {
+    const data = await fetch('/api/buses/live', { cache: 'no-store' }).then(r => r.json());
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
