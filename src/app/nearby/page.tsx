@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import Sidebar from "@/components/Sidebar";
 import TopAppBar from "@/components/TopAppBar";
-import { fetchRoutes, fetchBusesByRoute } from "@/services/api";
+import { fetchRoutes, fetchBusesByRoute, fetchAllTransitRoutes } from "@/services/api";
+import type { ApiTransitRoute } from "@/services/api";
 
 interface BusRoute {
   id: string;
@@ -29,8 +30,17 @@ function NearbyBusesContent() {
   const routeIdsParam = searchParams.get("routeIds");  // comma list — from home page search
 
   const [allRoutes, setAllRoutes] = useState<BusRoute[]>([]);
+  const [transitRoutes, setTransitRoutes] = useState<Record<string, ApiTransitRoute>>({});
   const [destinationFilter, setDestinationFilter] = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [sortOption, setSortOption] = useState(0);
+  const destInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    fetchAllTransitRoutes()
+      .then(setTransitRoutes)
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const mapRoutes = (data: import("@/services/api").ApiRoute[]): BusRoute[] =>
@@ -86,6 +96,19 @@ function NearbyBusesContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeId]);
 
+  // Collect stop names from all transit routes for autocomplete
+  const stopSuggestions = useMemo(() => {
+    if (!destinationFilter.trim()) return [];
+    const query = destinationFilter.toLowerCase();
+    const names = new Set<string>();
+    Object.values(transitRoutes).forEach((r) => {
+      r.stops?.forEach((s) => {
+        if (s.name.toLowerCase().includes(query)) names.add(s.name);
+      });
+    });
+    return Array.from(names).slice(0, 6);
+  }, [destinationFilter, transitRoutes]);
+
   // Filter buses by route parameter — skip when routeId is set because the
   // fleet API already returned only buses for that route.
   let filteredBuses = (routeParam && !routeId)
@@ -98,11 +121,19 @@ function NearbyBusesContent() {
     filteredBuses = allRoutes.filter((bus) => ids.has(bus.id));
   }
 
-  // Filter by destination
+  // Filter by destination — match against actual route stops, fall back to destination string
   if (destinationFilter.trim()) {
-    filteredBuses = filteredBuses.filter((bus) =>
-      bus.destination.toLowerCase().includes(destinationFilter.toLowerCase())
-    );
+    const query = destinationFilter.toLowerCase();
+    filteredBuses = filteredBuses.filter((bus) => {
+      // When fleet buses are shown, all belong to routeId — check that route's stops
+      const trId = routeId ?? bus.id;
+      const tr = transitRoutes[trId];
+      if (tr?.stops?.length) {
+        return tr.stops.some((s) => s.name.toLowerCase().includes(query));
+      }
+      // Fallback: match against destination string
+      return bus.destination.toLowerCase().includes(query);
+    });
   }
 
   // Sort buses
@@ -227,57 +258,119 @@ function NearbyBusesContent() {
           </div>
 
           {/* Destination Filter */}
-          <div
-            className="card"
-            style={{
-              padding: "1.25rem",
-              marginBottom: "1.5rem",
-              display: "flex",
-              alignItems: "center",
-              gap: "1rem",
-            }}
-          >
-            <span
-              className="material-symbols-outlined"
-              style={{ fontSize: "20px", color: "var(--color-outline)" }}
-            >
-              filter_alt
-            </span>
-            <input
-              type="text"
-              value={destinationFilter}
-              onChange={(e) => setDestinationFilter(e.target.value)}
-              placeholder="Filter by destination (e.g., Piliyandala, Maharagama)"
-              className="input-field"
+          <div style={{ position: "relative", marginBottom: "1.5rem" }}>
+            <div
+              className="card"
               style={{
-                flex: 1,
-                border: "none",
-                background: "transparent",
-                fontSize: "0.9375rem",
-                padding: 0,
+                padding: "1.25rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "1rem",
               }}
-            />
-            {destinationFilter && (
-              <button
-                onClick={() => setDestinationFilter("")}
+            >
+              <span
+                className="material-symbols-outlined"
+                style={{ fontSize: "20px", color: "var(--color-outline)" }}
+              >
+                location_on
+              </span>
+              <input
+                ref={destInputRef}
+                type="text"
+                value={destinationFilter}
+                onChange={(e) => {
+                  setDestinationFilter(e.target.value);
+                  setShowSuggestions(true);
+                }}
+                onFocus={() => setShowSuggestions(true)}
+                onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                placeholder="Filter by drop-off stop (e.g., Piliyandala, Maharagama)"
+                className="input-field"
                 style={{
-                  width: "32px",
-                  height: "32px",
-                  borderRadius: "50%",
-                  backgroundColor: "var(--color-surface-container)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: "pointer",
+                  flex: 1,
+                  border: "none",
+                  background: "transparent",
+                  fontSize: "0.9375rem",
+                  padding: 0,
+                }}
+              />
+              {destinationFilter && (
+                <button
+                  onClick={() => { setDestinationFilter(""); setShowSuggestions(false); }}
+                  style={{
+                    width: "32px",
+                    height: "32px",
+                    borderRadius: "50%",
+                    backgroundColor: "var(--color-surface-container)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                  }}
+                >
+                  <span
+                    className="material-symbols-outlined"
+                    style={{ fontSize: "18px", color: "var(--color-on-surface)" }}
+                  >
+                    close
+                  </span>
+                </button>
+              )}
+            </div>
+
+            {/* Stop suggestions dropdown */}
+            {showSuggestions && stopSuggestions.length > 0 && (
+              <div
+                className="card"
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 4px)",
+                  left: 0,
+                  right: 0,
+                  zIndex: 50,
+                  padding: "0.5rem 0",
+                  boxShadow: "var(--shadow-elevated)",
+                  borderRadius: "var(--radius-lg)",
+                  overflow: "hidden",
                 }}
               >
-                <span
-                  className="material-symbols-outlined"
-                  style={{ fontSize: "18px", color: "var(--color-on-surface)" }}
-                >
-                  close
-                </span>
-              </button>
+                {stopSuggestions.map((name) => (
+                  <button
+                    key={name}
+                    onMouseDown={() => {
+                      setDestinationFilter(name);
+                      setShowSuggestions(false);
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "0.625rem 1.25rem",
+                      textAlign: "left",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.75rem",
+                      fontSize: "0.9375rem",
+                      color: "var(--color-on-surface)",
+                      background: "none",
+                      cursor: "pointer",
+                    }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background =
+                        "var(--color-surface-container)";
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background = "none";
+                    }}
+                  >
+                    <span
+                      className="material-symbols-outlined"
+                      style={{ fontSize: "16px", color: "var(--color-outline)", flexShrink: 0 }}
+                    >
+                      place
+                    </span>
+                    {name}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
 
