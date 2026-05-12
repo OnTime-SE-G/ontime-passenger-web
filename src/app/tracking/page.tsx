@@ -12,9 +12,37 @@ import {
   getStopState,
   stopTimeLabel,
   type TransitRoute,
+  type RouteStop,
 } from "@/lib/transitData";
+import type { StopEta } from "@/lib/socket/socketTypes";
 import { fetchAllTransitRoutes, fetchLiveBuses } from "@/services/api";
 import { useBusTracking } from "@/hooks/useBusTracking";
+
+function liveStopLabel(
+  stop: RouteStop,
+  i: number,
+  totalStops: number,
+  prog: number,
+  stopEtas: StopEta[] | undefined,
+): string {
+  if (!stopEtas || stopEtas.length === 0) {
+    // No live data yet — use position-based formula
+    return stopTimeLabel(i, totalStops, prog);
+  }
+
+  const stopNameKey = stop.name.toLowerCase().trim();
+  const matchIdx = stopEtas.findIndex(
+    (s) => (s.stopName ?? "").toLowerCase().trim() === stopNameKey,
+  );
+
+  if (matchIdx === -1) {
+    // Stop not in upcoming list but we have live data → already passed
+    return "Departed";
+  }
+
+  const mins = Math.max(1, Math.round(stopEtas[matchIdx].etaSeconds / 60));
+  return matchIdx === 0 ? `Arriving ~${mins} min` : `~${mins} min`;
+}
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN?.trim();
 const HAS_MAPBOX_TOKEN = Boolean(MAPBOX_TOKEN);
@@ -409,7 +437,7 @@ function TrackingContent() {
             <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
               {route.stops.map((stop, i) => {
                 const state = getStopState(i, route.stops.length, prog);
-                const label = stopTimeLabel(i, route.stops.length, prog);
+                const label = liveStopLabel(stop, i, route.stops.length, prog, liveBus?.stopEtas);
                 return (
                   <div key={i} style={{
                     display: "flex", alignItems: "flex-start", gap: "0.875rem",

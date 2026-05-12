@@ -33,7 +33,7 @@ export function useBusTracking() {
 
   const onEta = useCallback(
     (data: BusEtaUpdate) => {
-      patchEta(data.busId, data.eta);
+      patchEta(data.busId, data.eta, data.stopEtas);
     },
     [patchEta]
   );

@@ -6,13 +6,15 @@ import type { BusLocation } from '@/lib/socket/socketAdapter';
  */
 type Status = 'disconnected' | 'connecting' | 'connected' | 'error';
 
+import type { StopEta } from '@/lib/socket/socketTypes';
+
 interface BusStore {
   buses: Map<string, BusLocation>;
   connectionStatus: Status;
   lastUpdateAt: number;
 
   updateBus: (bus: BusLocation) => void;
-  patchEta: (busId: string, eta: number) => void;
+  patchEta: (busId: string, eta: number, stopEtas?: StopEta[]) => void;
   setStatus: (s: Status) => void;
   clearBuses: () => void;
 
@@ -67,12 +69,16 @@ export const useBusStore = create<BusStore>((set, get) => ({
     });
   },
 
-  patchEta: (busId, eta) =>
+  patchEta: (busId, eta, stopEtas) =>
     set(({ buses }) => {
       const existing = buses.get(busId);
-      if (!existing || existing.eta === eta) return {};
+      if (!existing) return {};
       const next = new Map(buses);
-      next.set(busId, { ...existing, eta });
+      next.set(busId, {
+        ...existing,
+        eta,
+        ...(stopEtas !== undefined && { stopEtas }),
+      });
       return { buses: next, lastUpdateAt: Date.now() };
     }),
 

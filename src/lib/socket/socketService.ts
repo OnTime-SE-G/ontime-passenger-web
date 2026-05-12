@@ -2,6 +2,7 @@ import type {
   SocketClient,
   SocketEventHandler,
   SocketEventMap,
+  StopEta,
 } from './socketTypes';
 
 export type BusLocation = {
@@ -16,6 +17,7 @@ export type BusLocation = {
   status: 'active' | 'delayed';
   driverName: string;
   eta: number;
+  stopEtas?: StopEta[];
 };
 
 type Listeners = Map<string, Set<(data: unknown) => void>>;
@@ -52,9 +54,16 @@ class SocketService {
 
         if (raw.event === 'eta_update') {
           const etaSec = raw.eta_seconds != null ? Number(raw.eta_seconds) : null;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const stopEtas: StopEta[] = (raw.stop_etas ?? []).map((s: any) => ({
+            stopId:     Number(s.stopId ?? s.stop_id ?? 0),
+            stopName:   (s.stopName ?? s.stop_name ?? null) as string | null,
+            etaSeconds: Number(s.etaSeconds ?? s.eta_seconds ?? 0),
+          }));
           this._dispatch('bus:eta', {
-            busId: String(raw.busId ?? raw.bus_id ?? ''),
-            eta:   etaSec != null ? Math.max(1, Math.round(etaSec / 60)) : Number(raw.eta ?? 0),
+            busId:    String(raw.busId ?? raw.bus_id ?? ''),
+            eta:      etaSec != null ? Math.max(1, Math.round(etaSec / 60)) : Number(raw.eta ?? 0),
+            stopEtas,
           });
           return;
         }

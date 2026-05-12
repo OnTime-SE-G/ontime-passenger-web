@@ -1,8 +1,15 @@
 import type { BusLocation } from './socketService';
 
+export type StopEta = {
+  stopId: number;
+  stopName: string | null;
+  etaSeconds: number;
+};
+
 export type BusEtaUpdate = {
   busId: string;
   eta: number;
+  stopEtas: StopEta[];
 };
 
 export type SocketEventMap = {
