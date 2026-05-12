@@ -122,7 +122,7 @@ function TrackingContent() {
     liveBus?.occupancy === "medium" ? 55 : 25;
 
   const eta     = Math.max(1, Math.round((1 - prog) * 28));
-  const liveEta = liveBus?.eta ?? eta;
+  const liveEta = liveBus?.eta || eta;
   const liveSpd = liveBus ? Math.round(liveBus.speed) : speed;
 
   // ── Map init ──────────────────────────────────────────────────────────────

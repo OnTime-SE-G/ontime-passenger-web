@@ -51,9 +51,10 @@ class SocketService {
         const raw = JSON.parse(event.data as string);
 
         if (raw.event === 'eta_update') {
+          const etaSec = raw.eta_seconds != null ? Number(raw.eta_seconds) : null;
           this._dispatch('bus:eta', {
             busId: String(raw.busId ?? raw.bus_id ?? ''),
-            eta:   Number(raw.eta_seconds ?? raw.eta ?? 0),
+            eta:   etaSec != null ? Math.max(1, Math.round(etaSec / 60)) : Number(raw.eta ?? 0),
           });
           return;
         }

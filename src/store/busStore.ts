@@ -55,7 +55,10 @@ export const useBusStore = create<BusStore>((set, get) => ({
       }
 
       const next = new Map(buses);
-      next.set(bus.busId, bus);
+      // Preserve a non-zero ETA that patchEta already set; fleet:live messages
+      // come from Flink which doesn't compute ETA and always sends eta:0.
+      const eta = bus.eta || existing?.eta || 0;
+      next.set(bus.busId, { ...bus, eta });
 
       return {
         buses: next,
