@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
@@ -36,7 +36,7 @@ function stopDot(selected: boolean): HTMLDivElement {
   return el;
 }
 
-export default function BusStopsPage() {
+function BusStopsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -490,5 +490,13 @@ export default function BusStopsPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function BusStopsPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <BusStopsContent />
+    </Suspense>
   );
 }
