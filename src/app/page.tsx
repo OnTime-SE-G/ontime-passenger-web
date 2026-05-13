@@ -107,21 +107,23 @@ export default function RoutesPage() {
         key: s.name.toLowerCase().trim(),
       }));
 
-    let best: { id: string; name: string; dist: number } | null = null;
+    let bestStop: { id: string; name: string } | null = null;
+    let bestDist = Number.POSITIVE_INFINITY;
 
-    routes.forEach((route) => {
+    for (const route of routes) {
       const key = route.start_stop_name.toLowerCase().trim();
-      normalizedStops.forEach((stop) => {
-        if (stop.key !== key) return;
+      for (const stop of normalizedStops) {
+        if (stop.key !== key) continue;
         const [lng, lat] = stop.coordinates;
         const dist = distanceMeters(originLat, originLng, lat, lng);
-        if (!best || dist < best.dist) {
-          best = { id: stop.id, name: stop.name, dist };
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestStop = { id: stop.id, name: stop.name };
         }
-      });
-    });
+      }
+    }
 
-    if (best) return { id: best.id, name: best.name };
+    if (bestStop) return bestStop;
 
     const fallbackName = routes[0]?.start_stop_name?.toLowerCase().trim();
     if (!fallbackName) return null;
