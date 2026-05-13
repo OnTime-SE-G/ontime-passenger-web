@@ -145,10 +145,6 @@ function TrackingContent() {
   const liveRoute  = liveBus?.routeId    ?? routeParam;
   const liveName   = liveBus?.driverName ?? "";
 
-  const liveOccupancyPct =
-    liveBus?.occupancy === "high"   ? 88 :
-    liveBus?.occupancy === "medium" ? 55 : 25;
-
   const eta     = Math.max(1, Math.round((1 - prog) * 28));
   const liveEta = liveBus?.eta || eta;
   const liveSpd = liveBus ? Math.round(liveBus.speed) : speed;
@@ -388,11 +384,10 @@ function TrackingContent() {
           </div>
 
           {/* ── Stats ───────────────────────────────────────────────────── */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.625rem" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.625rem" }}>
             {[
               { label: "ETA",   value: `${liveEta} min`,       icon: "schedule" },
               { label: "Speed", value: `${liveSpd} km/h`,      icon: "speed"    },
-              { label: "Load",  value: `${liveOccupancyPct}%`, icon: "groups"   },
             ].map(({ label, value, icon }) => (
               <div key={label} style={{
                 background: "var(--color-surface-container)",
