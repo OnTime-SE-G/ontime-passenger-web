@@ -42,7 +42,7 @@ function BusStopsContent() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const userMarker = useRef<mapboxgl.Marker | null>(null);
-  const markerEls = useRef<Map<string, HTMLDivElement>>(new Map());
+  const markers = useRef<Map<string, mapboxgl.Marker>>(new Map());
 
   const [stops, setStops] = useState<MappedStop[]>([]);
   const [selectedStop, setSelectedStop] = useState<string | null>(null);
@@ -163,22 +163,32 @@ function BusStopsContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Fetch stops when focusCoords changes
   useEffect(() => {
     if (focusCoords) {
       loadNearbyStops(focusCoords[1], focusCoords[0]);
-      if (isMapReady && map.current) {
-        userMarker.current?.setLngLat(focusCoords);
-        map.current.flyTo({ center: focusCoords, zoom: 15, duration: 900 });
-      }
-      return;
     }
+  }, [focusCoords, loadNearbyStops]);
 
-    if (isMapReady) requestLocation();
-  }, [focusCoords, isMapReady, loadNearbyStops, requestLocation]);
+  // Update map center and user marker
+  useEffect(() => {
+    if (focusCoords && isMapReady && map.current) {
+      userMarker.current?.setLngLat(focusCoords);
+      map.current.flyTo({ center: focusCoords, zoom: 15, duration: 900 });
+    }
+  }, [focusCoords, isMapReady]);
+
+  // Request location if no focusCoords
+  useEffect(() => {
+    if (!focusCoords && isMapReady) {
+      requestLocation();
+    }
+  }, [focusCoords, isMapReady, requestLocation]);
 
   // Sync marker colours with selection
   useEffect(() => {
-    markerEls.current.forEach((el, id) => {
+    markers.current.forEach((marker, id) => {
+      const el = marker.getElement();
       const sel = id === selectedStop;
       el.style.background = sel ? "#004ac6" : "#64748b";
       el.style.transform = sel ? "scale(1.35)" : "scale(1)";
@@ -188,22 +198,19 @@ function BusStopsContent() {
   // Add/update map markers whenever stops list changes (API fetch or nearby)
   useEffect(() => {
     if (!map.current || !isMapReady) return;
-    // Remove old markers
-    markerEls.current.forEach((el) => {
-      // mapboxgl markers are removed by calling .remove() on the Marker instance
-      // We stored only the element, so detach from DOM directly
-      el.parentElement?.remove();
-    });
-    markerEls.current.clear();
+    // Remove old markers safely
+    markers.current.forEach((marker) => marker.remove());
+    markers.current.clear();
     // Add new markers
     stops.forEach((stop) => {
       const el = stopDot(stop.id === selectedStop);
-      markerEls.current.set(stop.id, el);
-      new mapboxgl.Marker({ element: el, anchor: "center" })
+      const marker = new mapboxgl.Marker({ element: el, anchor: "center" })
         .setLngLat(stop.coordinates)
         .addTo(map.current!);
+      markers.current.set(stop.id, marker);
       el.addEventListener("click", () => selectStop(stop.id));
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stops, isMapReady]);
 
   function selectStop(id: string) {
