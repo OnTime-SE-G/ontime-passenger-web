@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import Sidebar from "@/components/Sidebar";
@@ -38,6 +38,7 @@ function stopDot(selected: boolean): HTMLDivElement {
 
 export default function BusStopsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const userMarker = useRef<mapboxgl.Marker | null>(null);
@@ -49,8 +50,25 @@ export default function BusStopsPage() {
   const [locating, setLocating] = useState(false);
   const [nearbyMode, setNearbyMode] = useState(false);
   const mapLoaded = useRef(false);
+  const [isMapReady, setIsMapReady] = useState(false);
+
+  const queryParam = searchParams.get("query") ?? "";
+  const latParam = searchParams.get("lat");
+  const lonParam = searchParams.get("lon");
+
+  const focusCoords = useMemo<[number, number] | null>(() => {
+    const lat = latParam == null ? NaN : Number(latParam);
+    const lon = lonParam == null ? NaN : Number(lonParam);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    return [lon, lat];
+  }, [latParam, lonParam]);
 
   useEffect(() => {
+    setSearchQuery(queryParam);
+  }, [queryParam]);
+
+  useEffect(() => {
+    if (focusCoords) return;
     fetchAllStops()
       .then((data) => {
         const mapped: MappedStop[] = data
@@ -64,9 +82,28 @@ export default function BusStopsPage() {
         if (mapped.length > 0) setStops(mapped);
       })
       .catch(() => {});
+  }, [focusCoords]);
+
+  const loadNearbyStops = useCallback((lat: number, lon: number) => {
+    return fetchNearbyStops(lat, lon, 1500)
+      .then((data) => {
+        const mapped: MappedStop[] = data
+          .filter((s) => s.coordinates)
+          .map((s) => ({
+            id: String(s.id),
+            name: s.name,
+            coordinates: s.coordinates as [number, number],
+            routes: s.routes,
+          }));
+        if (mapped.length > 0) {
+          setStops(mapped);
+          setNearbyMode(true);
+        }
+      })
+      .catch(() => {});
   }, []);
 
-  function requestLocation() {
+  const requestLocation = useCallback(() => {
     if (!navigator.geolocation) return;
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
@@ -79,28 +116,12 @@ export default function BusStopsPage() {
           duration: 900,
         });
         // Load stops near the user
-        fetchNearbyStops(latitude, longitude, 1500)
-          .then((data) => {
-            const mapped: MappedStop[] = data
-              .filter((s) => s.coordinates)
-              .map((s) => ({
-                id: String(s.id),
-                name: s.name,
-                coordinates: s.coordinates as [number, number],
-                routes: s.routes,
-              }));
-            if (mapped.length > 0) {
-              setStops(mapped);
-              setNearbyMode(true);
-            }
-          })
-          .catch(() => {});
-        setLocating(false);
+        loadNearbyStops(latitude, longitude).finally(() => setLocating(false));
       },
       () => setLocating(false),
       { enableHighAccuracy: true, timeout: 8000 },
     );
-  }
+  }, [loadNearbyStops]);
 
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
@@ -120,6 +141,7 @@ export default function BusStopsPage() {
     map.current.on("load", () => {
       const m = map.current!;
       mapLoaded.current = true;
+      setIsMapReady(true);
 
       // User dot
       const userEl = document.createElement("div");
@@ -129,7 +151,7 @@ export default function BusStopsPage() {
         .setLngLat(DEFAULT_CENTER)
         .addTo(m);
 
-      requestLocation();
+      requestAnimationFrame(() => m.resize());
     });
 
     return () => {
@@ -138,6 +160,19 @@ export default function BusStopsPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (focusCoords) {
+      loadNearbyStops(focusCoords[1], focusCoords[0]);
+      if (isMapReady && map.current) {
+        userMarker.current?.setLngLat(focusCoords);
+        map.current.flyTo({ center: focusCoords, zoom: 15, duration: 900 });
+      }
+      return;
+    }
+
+    if (isMapReady) requestLocation();
+  }, [focusCoords, isMapReady, loadNearbyStops, requestLocation]);
 
   // Sync marker colours with selection
   useEffect(() => {

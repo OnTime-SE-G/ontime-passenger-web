@@ -6,7 +6,7 @@ import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import Sidebar from "@/components/Sidebar";
 import TopAppBar from "@/components/TopAppBar";
-import { searchRoutes, fetchAllTransitRoutes } from "@/services/api";
+import { fetchAllTransitRoutes } from "@/services/api";
 
 const DEFAULT_CENTER: [number, number] = [79.8612, 6.9271];
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN?.trim();
@@ -75,51 +75,39 @@ export default function RoutesPage() {
     return center ? [center[0], center[1]] : null;
   }
 
+  function buildStopsUrl(query?: string, lat?: number, lon?: number) {
+    const params = new URLSearchParams();
+    if (query) params.set("query", query);
+    if (lat != null && lon != null) {
+      params.set("lat", String(lat));
+      params.set("lon", String(lon));
+    }
+    const qs = params.toString();
+    return qs ? `/stops?${qs}` : "/stops";
+  }
+
   async function handleSearch() {
-    if (!destinationLabel.trim()) {
+    const destination = destinationLabel.trim();
+    if (!destination) {
       router.push("/stops");
       return;
     }
     if (!HAS_MAPBOX_TOKEN) {
-      router.push("/stops");
+      router.push(buildStopsUrl(destination));
       return;
     }
     setIsSearching(true);
     try {
-      // Geocode destination
-      const destCoords = await geocode(destinationLabel);
+      // Geocode destination to show nearby stops around that location.
+      const destCoords = await geocode(destination);
       if (!destCoords) {
-        router.push("/stops");
+        router.push(buildStopsUrl(destination));
         return;
       }
       const [destLng, destLat] = destCoords;
-
-      // Resolve origin: use GPS if available, otherwise geocode the typed label
-      let originLng: number;
-      let originLat: number;
-      if (userCoords.current) {
-        [originLng, originLat] = userCoords.current;
-      } else if (originLabel.trim() && originLabel !== "Current Location") {
-        const originCoords = await geocode(originLabel);
-        if (!originCoords) {
-          router.push("/stops");
-          return;
-        }
-        [originLng, originLat] = originCoords;
-      } else {
-        router.push("/stops");
-        return;
-      }
-
-      const result = await searchRoutes(originLat, originLng, destLat, destLng);
-      if (result.count > 0) {
-        const ids = result.routes.map((r) => r.route_id).join(",");
-        router.push(`/nearby?routeIds=${ids}&stop=${encodeURIComponent(originLabel)}`);
-      } else {
-        router.push("/stops");
-      }
+      router.push(buildStopsUrl(destination, destLat, destLng));
     } catch {
-      router.push("/stops");
+      router.push(buildStopsUrl(destination));
     } finally {
       setIsSearching(false);
     }
