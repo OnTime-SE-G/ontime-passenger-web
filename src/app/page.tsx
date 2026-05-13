@@ -93,7 +93,7 @@ export default function RoutesPage() {
   }
 
   async function resolveNearestStartStop(
-    routes: { start_stop_name: string; route_id: number }[],
+    routes: { route_number: string | null; name: string }[],
     originLat: number,
     originLng: number,
   ): Promise<{ id: string; name: string } | null> {
@@ -104,31 +104,42 @@ export default function RoutesPage() {
         id: String(s.id),
         name: s.name,
         coordinates: s.coordinates as [number, number],
-        key: s.name.toLowerCase().trim(),
+        routes: s.routes || [],
       }));
 
     let bestStop: { id: string; name: string } | null = null;
     let bestDist = Number.POSITIVE_INFINITY;
 
-    for (const route of routes) {
-      const key = route.start_stop_name.toLowerCase().trim();
-      for (const stop of normalizedStops) {
-        if (stop.key !== key) continue;
-        const [lng, lat] = stop.coordinates;
-        const dist = distanceMeters(originLat, originLng, lat, lng);
-        if (dist < bestDist) {
-          bestDist = dist;
-          bestStop = { id: stop.id, name: stop.name };
-        }
+    const routeIdentifiers = new Set<string>();
+    routes.forEach(r => {
+      if (r.route_number) routeIdentifiers.add(r.route_number.toString().trim());
+      if (r.name) routeIdentifiers.add(r.name.trim());
+    });
+
+    for (const stop of normalizedStops) {
+      const servesRoute = stop.routes.some(r => routeIdentifiers.has(r.trim()));
+      if (!servesRoute) continue;
+
+      const [lng, lat] = stop.coordinates;
+      const dist = distanceMeters(originLat, originLng, lat, lng);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestStop = { id: stop.id, name: stop.name };
       }
     }
 
     if (bestStop) return bestStop;
 
-    const fallbackName = routes[0]?.start_stop_name?.toLowerCase().trim();
-    if (!fallbackName) return null;
-    const fallback = normalizedStops.find((stop) => stop.key === fallbackName);
-    return fallback ? { id: fallback.id, name: fallback.name } : null;
+    for (const stop of normalizedStops) {
+      const [lng, lat] = stop.coordinates;
+      const dist = distanceMeters(originLat, originLng, lat, lng);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestStop = { id: stop.id, name: stop.name };
+      }
+    }
+
+    return bestStop;
   }
 
   function buildStopsUrl(query?: string, lat?: number, lon?: number) {
