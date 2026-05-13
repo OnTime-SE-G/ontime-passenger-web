@@ -6,7 +6,7 @@ import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import Sidebar from "@/components/Sidebar";
 import TopAppBar from "@/components/TopAppBar";
-import { fetchAllTransitRoutes } from "@/services/api";
+import { fetchAllStops, fetchAllTransitRoutes, searchRoutes } from "@/services/api";
 
 const DEFAULT_CENTER: [number, number] = [79.8612, 6.9271];
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN?.trim();
@@ -75,6 +75,60 @@ export default function RoutesPage() {
     return center ? [center[0], center[1]] : null;
   }
 
+  function distanceMeters(
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number,
+  ): number {
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return 6371000 * c;
+  }
+
+  async function resolveNearestStartStop(
+    routes: { start_stop_name: string; route_id: number }[],
+    originLat: number,
+    originLng: number,
+  ): Promise<{ id: string; name: string } | null> {
+    const stops = await fetchAllStops();
+    const normalizedStops = stops
+      .filter((s) => s.coordinates)
+      .map((s) => ({
+        id: String(s.id),
+        name: s.name,
+        coordinates: s.coordinates as [number, number],
+        key: s.name.toLowerCase().trim(),
+      }));
+
+    let best: { id: string; name: string; dist: number } | null = null;
+
+    routes.forEach((route) => {
+      const key = route.start_stop_name.toLowerCase().trim();
+      normalizedStops.forEach((stop) => {
+        if (stop.key !== key) return;
+        const [lng, lat] = stop.coordinates;
+        const dist = distanceMeters(originLat, originLng, lat, lng);
+        if (!best || dist < best.dist) {
+          best = { id: stop.id, name: stop.name, dist };
+        }
+      });
+    });
+
+    if (best) return { id: best.id, name: best.name };
+
+    const fallbackName = routes[0]?.start_stop_name?.toLowerCase().trim();
+    if (!fallbackName) return null;
+    const fallback = normalizedStops.find((stop) => stop.key === fallbackName);
+    return fallback ? { id: fallback.id, name: fallback.name } : null;
+  }
+
   function buildStopsUrl(query?: string, lat?: number, lon?: number) {
     const params = new URLSearchParams();
     if (query) params.set("query", query);
@@ -98,14 +152,52 @@ export default function RoutesPage() {
     }
     setIsSearching(true);
     try {
-      // Geocode destination to show nearby stops around that location.
+      // Geocode destination to find routes that connect the user to it.
       const destCoords = await geocode(destination);
       if (!destCoords) {
         router.push(buildStopsUrl(destination));
         return;
       }
       const [destLng, destLat] = destCoords;
-      router.push(buildStopsUrl(destination, destLat, destLng));
+
+      // Resolve origin: use GPS if available, otherwise geocode the typed label
+      let originLng: number;
+      let originLat: number;
+      if (userCoords.current) {
+        [originLng, originLat] = userCoords.current;
+      } else if (originLabel.trim() && originLabel !== "Current Location") {
+        const originCoords = await geocode(originLabel);
+        if (!originCoords) {
+          router.push(buildStopsUrl(destination));
+          return;
+        }
+        [originLng, originLat] = originCoords;
+      } else {
+        router.push(buildStopsUrl(destination));
+        return;
+      }
+
+      const result = await searchRoutes(originLat, originLng, destLat, destLng);
+      if (result.count <= 0) {
+        router.push(buildStopsUrl(destination, destLat, destLng));
+        return;
+      }
+
+      const routeIds = result.routes.map((r) => r.route_id).join(",");
+      const nearestStop = await resolveNearestStartStop(
+        result.routes,
+        originLat,
+        originLng,
+      );
+
+      if (!nearestStop) {
+        router.push(buildStopsUrl(destination, destLat, destLng));
+        return;
+      }
+
+      router.push(
+        `/stop-details?id=${encodeURIComponent(nearestStop.id)}&name=${encodeURIComponent(nearestStop.name)}&routeIds=${routeIds}`,
+      );
     } catch {
       router.push(buildStopsUrl(destination));
     } finally {

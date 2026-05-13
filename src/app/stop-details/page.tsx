@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import Sidebar from "@/components/Sidebar";
@@ -19,23 +19,31 @@ function StopDetailsContent() {
   const searchParams = useSearchParams();
   const stopId = searchParams.get("id") || "1";
   const stopName = searchParams.get("name") || "Central Station";
+  const routeIdsParam = searchParams.get("routeIds") ?? "";
+
+  const routeIdSet = useMemo(() => {
+    const ids = routeIdsParam.split(",").map((id) => id.trim()).filter(Boolean);
+    return new Set(ids);
+  }, [routeIdsParam]);
 
   const [routes, setRoutes] = useState<Route[]>([]);
 
   useEffect(() => {
     fetchStopRoutes(stopId)
-      .then((data) =>
-        setRoutes(
-          data.map((r) => ({
-            id: String(r.id),
-            number: r.route_number ?? String(r.id),
-            name: r.name,
-            frequency: "Check live board",
-          })),
-        ),
-      )
+      .then((data) => {
+        const mapped = data.map((r) => ({
+          id: String(r.id),
+          number: r.route_number ?? String(r.id),
+          name: r.name,
+          frequency: "Check live board",
+        }));
+        const filtered = routeIdSet.size > 0
+          ? mapped.filter((r) => routeIdSet.has(r.id))
+          : mapped;
+        setRoutes(filtered);
+      })
       .catch(() => {});
-  }, [stopId]);
+  }, [routeIdSet, stopId]);
 
   const handleRouteSelect = (routeNumber: string, routeDbId: string) => {
     router.push(`/nearby?route=${routeNumber}&routeId=${routeDbId}&stop=${stopName}`);
