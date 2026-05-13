@@ -193,13 +193,19 @@ export default function RoutesPage() {
       );
 
       if (!nearestStop) {
-        router.push(buildStopsUrl(destination, destLat, destLng));
+        router.push(buildStopsUrl(destination, originLat, originLng));
         return;
       }
 
-      router.push(
-        `/stop-details?id=${encodeURIComponent(nearestStop.id)}&name=${encodeURIComponent(nearestStop.name)}&routeIds=${routeIds}`,
-      );
+      // Direct user to nearby stops (centered on their location)
+      // Pass the nearest stop ID to pre-select it, and routeIds to forward to stop-details
+      const params = new URLSearchParams();
+      params.set("lat", String(originLat));
+      params.set("lon", String(originLng));
+      params.set("selected", nearestStop.id);
+      params.set("routeIds", routeIds);
+      
+      router.push(`/stops?${params.toString()}`);
     } catch {
       router.push(buildStopsUrl(destination));
     } finally {

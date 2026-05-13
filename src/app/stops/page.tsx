@@ -55,6 +55,8 @@ function BusStopsContent() {
   const queryParam = searchParams.get("query") ?? "";
   const latParam = searchParams.get("lat");
   const lonParam = searchParams.get("lon");
+  const selectedParam = searchParams.get("selected");
+  const routeIdsParam = searchParams.get("routeIds");
 
   const focusCoords = useMemo<[number, number] | null>(() => {
     const lat = latParam == null ? NaN : Number(latParam);
@@ -185,7 +187,7 @@ function BusStopsContent() {
 
   // Add/update map markers whenever stops list changes (API fetch or nearby)
   useEffect(() => {
-    if (!map.current || !mapLoaded.current) return;
+    if (!map.current || !isMapReady) return;
     // Remove old markers
     markerEls.current.forEach((el) => {
       // mapboxgl markers are removed by calling .remove() on the Marker instance
@@ -202,8 +204,7 @@ function BusStopsContent() {
         .addTo(map.current!);
       el.addEventListener("click", () => selectStop(stop.id));
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stops]);
+  }, [stops, isMapReady]);
 
   function selectStop(id: string) {
     setSelectedStop(id);
@@ -216,6 +217,14 @@ function BusStopsContent() {
       });
     }
   }
+
+  // Pre-select stop from URL
+  useEffect(() => {
+    if (isMapReady && stops.length > 0 && selectedParam && !selectedStop) {
+      selectStop(selectedParam);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMapReady, stops, selectedParam]);
 
   const filtered = stops.filter((s) =>
     s.name.toLowerCase().includes(searchQuery.toLowerCase()),
@@ -473,9 +482,13 @@ function BusStopsContent() {
               onClick={() => {
                 const stop = stops.find((s) => s.id === selectedStop);
                 const name = stop?.name ?? selectedStop;
-                router.push(
-                  `/stop-details?id=${encodeURIComponent(selectedStop)}&name=${encodeURIComponent(name)}`,
-                );
+                const qs = new URLSearchParams();
+                qs.set("id", selectedStop);
+                qs.set("name", name);
+                if (routeIdsParam) {
+                  qs.set("routeIds", routeIdsParam);
+                }
+                router.push(`/stop-details?${qs.toString()}`);
               }}
             >
               View Available Buses
