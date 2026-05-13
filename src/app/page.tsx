@@ -197,6 +197,10 @@ export default function RoutesPage() {
       }
 
       const routeIds = result.routes.map((r) => r.route_id).join(",");
+      const routeNumbers = result.routes
+        .map((r) => r.route_number || r.name)
+        .filter(Boolean)
+        .join(",");
       const nearestStop = await resolveNearestStartStop(
         result.routes,
         originLat,
@@ -209,12 +213,15 @@ export default function RoutesPage() {
       }
 
       // Direct user to nearby stops (centered on their location)
-      // Pass the nearest stop ID to pre-select it, and routeIds to forward to stop-details
+      // Pass the nearest stop ID to pre-select it, routeIds for stop-details,
+      // and routeNumbers so the stops page can filter to relevant stops only.
       const params = new URLSearchParams();
       params.set("lat", String(originLat));
       params.set("lon", String(originLng));
       params.set("selected", nearestStop.id);
       params.set("routeIds", routeIds);
+      params.set("routeNumbers", routeNumbers);
+      params.set("destination", destination);
       
       router.push(`/stops?${params.toString()}`);
     } catch {

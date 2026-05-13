@@ -21,6 +21,21 @@ const HAS_MAPBOX_TOKEN = Boolean(MAPBOX_TOKEN);
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Haversine distance in metres between two lat/lon pairs */
+function distanceMeters(
+  lat1: number, lon1: number,
+  lat2: number, lon2: number,
+): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLon / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function stopDot(selected: boolean): HTMLDivElement {
   const el = document.createElement("div");
   el.style.cssText = [
@@ -52,11 +67,25 @@ function BusStopsContent() {
   const mapLoaded = useRef(false);
   const [isMapReady, setIsMapReady] = useState(false);
 
+  // ── URL parameters ──────────────────────────────────────────────────────
   const queryParam = searchParams.get("query") ?? "";
   const latParam = searchParams.get("lat");
   const lonParam = searchParams.get("lon");
   const selectedParam = searchParams.get("selected");
   const routeIdsParam = searchParams.get("routeIds");
+  const routeNumbersParam = searchParams.get("routeNumbers");
+  const destinationParam = searchParams.get("destination");
+
+  /** Set of route numbers/names used to filter stops in search mode */
+  const routeNumberSet = useMemo<Set<string>>(() => {
+    if (!routeNumbersParam) return new Set();
+    return new Set(
+      routeNumbersParam.split(",").map((s) => s.trim()).filter(Boolean),
+    );
+  }, [routeNumbersParam]);
+
+  /** True when the user arrived here from a destination search on the home page */
+  const isSearchMode = routeNumberSet.size > 0;
 
   const focusCoords = useMemo<[number, number] | null>(() => {
     const lat = latParam == null ? NaN : Number(latParam);
@@ -69,8 +98,62 @@ function BusStopsContent() {
     setSearchQuery(queryParam);
   }, [queryParam]);
 
+  // ── Data loading: SEARCH MODE ───────────────────────────────────────────
+  // When arriving from a destination search, fetch ALL stops, filter to those
+  // serving the matching routes, sort by distance from user, and auto-select
+  // the nearest one.
   useEffect(() => {
-    if (focusCoords) return;
+    if (!isSearchMode) return;
+
+    fetchAllStops()
+      .then((data) => {
+        const allMapped: MappedStop[] = data
+          .filter((s) => s.coordinates)
+          .map((s) => ({
+            id: String(s.id),
+            name: s.name,
+            coordinates: s.coordinates as [number, number],
+            routes: s.routes,
+          }));
+
+        // Filter to stops that serve at least one of the matching routes
+        let serving = allMapped.filter((s) =>
+          s.routes.some((r) => routeNumberSet.has(r.trim())),
+        );
+
+        // If no stops match route numbers, fall back to all stops
+        if (serving.length === 0) serving = allMapped;
+
+        // Sort by distance from user's location
+        if (focusCoords) {
+          const [userLng, userLat] = focusCoords;
+          serving.sort((a, b) => {
+            const dA = distanceMeters(userLat, userLng, a.coordinates[1], a.coordinates[0]);
+            const dB = distanceMeters(userLat, userLng, b.coordinates[1], b.coordinates[0]);
+            return dA - dB;
+          });
+        }
+
+        if (serving.length > 0) {
+          setStops(serving);
+          setNearbyMode(true);
+
+          // Auto-select: prefer the URL param, fall back to nearest
+          const toSelect =
+            selectedParam && serving.find((s) => s.id === selectedParam)
+              ? selectedParam
+              : serving[0].id;
+          setSelectedStop(toSelect);
+        }
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSearchMode, routeNumbersParam, focusCoords?.[0], focusCoords?.[1]]);
+
+  // ── Data loading: DEFAULT MODE (no search) ──────────────────────────────
+  // When the user navigates to /stops directly (no search), load all stops.
+  useEffect(() => {
+    if (focusCoords || isSearchMode) return;
     fetchAllStops()
       .then((data) => {
         const mapped: MappedStop[] = data
@@ -84,7 +167,7 @@ function BusStopsContent() {
         if (mapped.length > 0) setStops(mapped);
       })
       .catch(() => {});
-  }, [focusCoords]);
+  }, [focusCoords, isSearchMode]);
 
   const loadNearbyStops = useCallback((lat: number, lon: number) => {
     return fetchNearbyStops(lat, lon, 1500)
@@ -125,6 +208,7 @@ function BusStopsContent() {
     );
   }, [loadNearbyStops]);
 
+  // ── Map initialisation ──────────────────────────────────────────────────
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
     if (!HAS_MAPBOX_TOKEN) return;
@@ -163,12 +247,13 @@ function BusStopsContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fetch stops when focusCoords changes
+  // ── Load nearby stops when focusCoords set WITHOUT search mode ──────────
   useEffect(() => {
+    if (isSearchMode) return; // search mode handles its own loading
     if (focusCoords) {
       loadNearbyStops(focusCoords[1], focusCoords[0]);
     }
-  }, [focusCoords, loadNearbyStops]);
+  }, [focusCoords, loadNearbyStops, isSearchMode]);
 
   // Update map center and user marker
   useEffect(() => {
@@ -178,12 +263,12 @@ function BusStopsContent() {
     }
   }, [focusCoords, isMapReady]);
 
-  // Request location if no focusCoords
+  // Request location if no focusCoords and not in search mode
   useEffect(() => {
-    if (!focusCoords && isMapReady) {
+    if (!focusCoords && !isSearchMode && isMapReady) {
       requestLocation();
     }
-  }, [focusCoords, isMapReady, requestLocation]);
+  }, [focusCoords, isSearchMode, isMapReady, requestLocation]);
 
   // Sync marker colours with selection
   useEffect(() => {
@@ -225,17 +310,39 @@ function BusStopsContent() {
     }
   }
 
-  // Pre-select stop from URL
+  // Pre-select stop from URL (non-search mode only; search mode auto-selects above)
   useEffect(() => {
+    if (isSearchMode) return;
     if (isMapReady && stops.length > 0 && selectedParam && !selectedStop) {
       selectStop(selectedParam);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMapReady, stops, selectedParam]);
+  }, [isMapReady, stops, selectedParam, isSearchMode]);
+
+  // When search mode auto-selected a stop AND map is ready, fly to it
+  useEffect(() => {
+    if (!isSearchMode || !isMapReady || !selectedStop) return;
+    const stop = stops.find((s) => s.id === selectedStop);
+    if (stop && map.current) {
+      map.current.flyTo({
+        center: stop.coordinates,
+        zoom: 15.5,
+        duration: 700,
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMapReady, selectedStop, stops.length]);
 
   const filtered = stops.filter((s) =>
     s.name.toLowerCase().includes(searchQuery.toLowerCase()),
   );
+
+  // ── Panel header text ───────────────────────────────────────────────────
+  const panelTitle = isSearchMode
+    ? `Stops to ${destinationParam || "Destination"}`
+    : nearbyMode
+      ? "Stops Near You"
+      : "Nearby Stops";
 
   return (
     <div className="app-layout">
@@ -321,6 +428,37 @@ function BusStopsContent() {
 
         {/* Stop list panel */}
         <div className="stops-list-panel glass-panel">
+          {/* Destination context banner (search mode only) */}
+          {isSearchMode && destinationParam && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.625rem",
+                padding: "0.625rem 0.875rem",
+                backgroundColor: "rgba(0,74,198,0.08)",
+                borderRadius: "var(--radius-lg)",
+                marginBottom: "0.25rem",
+              }}
+            >
+              <span
+                className="material-symbols-outlined"
+                style={{ fontSize: "18px", color: "var(--color-primary)" }}
+              >
+                location_on
+              </span>
+              <span
+                style={{
+                  fontSize: "0.8125rem",
+                  fontWeight: 600,
+                  color: "var(--color-primary)",
+                }}
+              >
+                Travelling to {destinationParam}
+              </span>
+            </div>
+          )}
+
           <div
             style={{
               display: "flex",
@@ -335,10 +473,10 @@ function BusStopsContent() {
                 color: "var(--color-on-surface)",
               }}
             >
-              {nearbyMode ? "Stops Near You" : "Nearby Stops"}
+              {panelTitle}
             </h3>
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              {nearbyMode && (
+              {nearbyMode && !isSearchMode && (
                 <button
                   onClick={() => {
                     setNearbyMode(false);
